@@ -3,22 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Non-Least Action Particle Simulation</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <title>Non-Stationary Action Particle Simulation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
             margin: 0;
             padding: 0;
+            background-color: #1a202c; /* Tailwind gray-900 */
+            color: #e2e8f0; /* Tailwind gray-300 */
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            background-color: #1a202c; /* Tailwind gray-900 */
-            color: #e2e8f0; /* Tailwind gray-300 */
-            overflow: hidden; /* Prevent scrollbars from canvas behavior */
+            overflow: hidden; /* Prevent scrollbars from canvas resizing */
         }
         #simulationCanvas {
             display: block;
@@ -27,214 +27,237 @@
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
         .controls {
-            margin-top: 1.5rem; /* Tailwind mt-6 */
-            display: flex;
-            gap: 1rem; /* Tailwind space-x-4 */
+            background-color: #2d3748; /* Tailwind gray-800 */
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
         }
-        .control-button {
+        .controls label {
+            margin-right: 0.5rem;
+        }
+        .controls input[type="range"] {
+            width: 100px;
+            margin-right: 1rem;
+        }
+        .controls button {
             background-color: #4a5568; /* Tailwind gray-700 */
-            color: #e2e8f0; /* Tailwind gray-300 */
-            padding: 0.5rem 1rem; /* Tailwind px-4 py-2 */
-            border: none;
+            color: white;
+            padding: 0.5rem 1rem;
             border-radius: 0.375rem; /* Tailwind rounded-md */
-            font-weight: 600;
+            border: none;
             cursor: pointer;
-            transition: background-color 0.2s ease-in-out;
+            transition: background-color 0.2s;
         }
-        .control-button:hover {
-            background-color: #718096; /* Tailwind gray-600 */
+        .controls button:hover {
+            background-color: #2c5282; /* Tailwind blue-700 */
         }
         .info-text {
             margin-top: 1rem;
             font-size: 0.875rem; /* Tailwind text-sm */
             color: #a0aec0; /* Tailwind gray-500 */
             text-align: center;
+            max-width: 600px;
         }
     </style>
 </head>
-<body>
-    <h1 class="text-3xl font-bold mb-6 text-gray-100">2D Particle Simulation</h1>
-    <p class="mb-4 text-gray-400 text-center max-w-xl">
-        Particles move and bounce off walls. Their velocity is randomly perturbed at each step,
-        meaning they don't follow paths of least action (e.g., straight lines in empty space).
-    </p>
+<body class="bg-gray-900 text-gray-300 flex flex-col items-center justify-center min-h-screen p-4">
+    <h1 class="text-2xl font-bold mb-4 text-center">Non-Stationary Action Particle Simulation</h1>
     <canvas id="simulationCanvas"></canvas>
-    <div class="controls">
-        <button id="resetButton" class="control-button">Reset Simulation</button>
-        <button id="addParticleButton" class="control-button">Add Particle</button>
-        <button id="removeParticleButton" class="control-button">Remove Particle</button>
+    <div class="controls mt-4 p-4 bg-gray-800 rounded-lg shadow-md text-sm">
+        <label for="numParticles">Particles:</label>
+        <input type="range" id="numParticles" min="10" max="300" value="100">
+        <span id="numParticlesValue">100</span>
+        
+        <label for="interactionRadius" class="ml-4">Interaction Radius:</label>
+        <input type="range" id="interactionRadius" min="5" max="100" value="30">
+        <span id="interactionRadiusValue">30</span>
+
+        <button id="resetButton" class="ml-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md">Reset Simulation</button>
     </div>
-     <div class="info-text">
-        Particle Count: <span id="particleCount">0</span>
-    </div>
+    <p class="info-text mt-4 text-sm text-gray-500 text-center max-w-xl">
+        Particles move based on rules not derived from stationary action (e.g., Newton's laws).
+        Their velocity depends on their position (<code>vx = A*sin(ky+phaseX)</code>, <code>vy = B*cos(kx+phaseY)</code>).
+        When particles are close, their internal 'phase' parameters are perturbed, changing their movement patterns.
+    </p>
 
     <script>
         const canvas = document.getElementById('simulationCanvas');
         const ctx = canvas.getContext('2d');
-        const particleCountSpan = document.getElementById('particleCount');
+
+        // --- Simulation Parameters ---
+        let NUM_PARTICLES = 100;
+        const PARTICLE_RADIUS = 3;
+        const SPEED_AMPLITUDE_A = 1.5; // Max speed component
+        const SPEED_AMPLITUDE_B = 1.5; // Max speed component
+        const WAVE_NUMBER_K = 0.02;   // Spatial frequency for velocity pattern
+        let INTERACTION_RADIUS = 30;
+        const PHASE_PERTURBATION_MAGNITUDE = 0.2;
+        const DT = 0.5; // Time step multiplier for position updates
 
         let particles = [];
-        const numInitialParticles = 20;
-        const particleRadius = 5;
-        const perturbationStrength = 0.2; // How much to randomly change velocity
 
-        // Function to generate a random color
+        // --- UI Elements ---
+        const numParticlesSlider = document.getElementById('numParticles');
+        const numParticlesValueDisplay = document.getElementById('numParticlesValue');
+        const interactionRadiusSlider = document.getElementById('interactionRadius');
+        const interactionRadiusValueDisplay = document.getElementById('interactionRadiusValue');
+        const resetButton = document.getElementById('resetButton');
+
+        // --- Utility Functions ---
         function getRandomColor() {
-            const r = Math.floor(Math.random() * 200) + 55; // Avoid very dark colors
-            const g = Math.floor(Math.random() * 200) + 55;
-            const b = Math.floor(Math.random() * 200) + 55;
+            const r = Math.floor(Math.random() * 155) + 100; // Brighter colors
+            const g = Math.floor(Math.random() * 155) + 100;
+            const b = Math.floor(Math.random() * 155) + 100;
             return `rgb(${r},${g},${b})`;
         }
 
-        // Particle class
-        class Particle {
-            constructor(x, y, vx, vy, color) {
-                this.x = x;
-                this.y = y;
-                this.vx = vx;
-                this.vy = vy;
-                this.radius = particleRadius;
-                this.color = color || getRandomColor();
-            }
-
-            // Draw the particle
-            draw() {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = this.color;
-                ctx.fill();
-                ctx.closePath();
-            }
-
-            // Update particle position and apply "non-least action" perturbation
-            update() {
-                // Standard motion
-                this.x += this.vx;
-                this.y += this.vy;
-
-                // "Non-least action" perturbation:
-                // Add a small random change to velocity. This "force" is not derived
-                // from a potential field, so the particle won't follow a path of least action.
-                this.vx += (Math.random() - 0.5) * perturbationStrength;
-                this.vy += (Math.random() - 0.5) * perturbationStrength;
-
-                // Optional: Max speed to prevent them from becoming too fast
-                const maxSpeed = 3;
-                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-                if (speed > maxSpeed) {
-                    this.vx = (this.vx / speed) * maxSpeed;
-                    this.vy = (this.vy / speed) * maxSpeed;
-                }
-
-                // Boundary checks (bounce off walls)
-                if (this.x + this.radius > canvas.width || this.x - this.radius < 0) {
-                    this.vx *= -1;
-                    this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x)); // Clamp position
-                }
-                if (this.y + this.radius > canvas.height || this.y - this.radius < 0) {
-                    this.vy *= -1;
-                    this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y)); // Clamp position
-                }
-            }
+        // --- Particle Class/Object ---
+        function createParticle(x, y) {
+            return {
+                x: x === undefined ? Math.random() * canvas.width : x,
+                y: y === undefined ? Math.random() * canvas.height : y,
+                vx: 0,
+                vy: 0,
+                phaseX: Math.random() * 2 * Math.PI, // Initial random phase for x-component
+                phaseY: Math.random() * 2 * Math.PI, // Initial random phase for y-component
+                color: getRandomColor()
+            };
         }
 
-        // Initialize particles
-        function initParticles() {
+        // --- Initialization ---
+        function initSimulation() {
+            // Set canvas size (responsive)
+            // Make it a bit smaller than full window width/height to leave space for text and controls
+            const padding = 60; // Total padding (30px on each side for controls/text)
+            const availableWidth = window.innerWidth - padding;
+            const availableHeight = window.innerHeight - document.querySelector('h1').offsetHeight - document.querySelector('.controls').offsetHeight - document.querySelector('.info-text').offsetHeight - padding * 2;
+            
+            const size = Math.min(availableWidth, availableHeight, 700); // Max size 700px
+            canvas.width = size;
+            canvas.height = size * 0.75; // Rectangular canvas
+
             particles = [];
-            for (let i = 0; i < numInitialParticles; i++) {
-                addOneParticle();
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                particles.push(createParticle());
             }
-            updateParticleCountDisplay();
         }
 
-        function addOneParticle() {
-            const x = Math.random() * (canvas.width - 2 * particleRadius) + particleRadius;
-            const y = Math.random() * (canvas.height - 2 * particleRadius) + particleRadius;
-            const vx = (Math.random() - 0.5) * 4; // Random initial velocity x
-            const vy = (Math.random() - 0.5) * 4; // Random initial velocity y
-            particles.push(new Particle(x, y, vx, vy));
-            updateParticleCountDisplay();
-        }
+        // --- Update Logic ---
+        function updateParticles() {
+            if (!canvas.width || !canvas.height) return; // Skip if canvas not sized
 
-        function removeOneParticle() {
-            if (particles.length > 0) {
-                particles.pop();
+            for (let i = 0; i < particles.length; i++) {
+                const p = particles[i];
+
+                // 1. Calculate intrinsic velocity based on position and phase
+                // This is the core "non-Newtonian" rule
+                p.vx = SPEED_AMPLITUDE_A * Math.sin(WAVE_NUMBER_K * p.y + p.phaseX);
+                p.vy = SPEED_AMPLITUDE_B * Math.cos(WAVE_NUMBER_K * p.x + p.phaseY);
+
+                // 2. Update position
+                p.x += p.vx * DT;
+                p.y += p.vy * DT;
+
+                // 3. Boundary conditions (wrap around)
+                if (p.x < 0) p.x = canvas.width;
+                if (p.x > canvas.width) p.x = 0;
+                if (p.y < 0) p.y = canvas.height;
+                if (p.y > canvas.height) p.y = 0;
             }
-            updateParticleCountDisplay();
-        }
-        
-        function updateParticleCountDisplay() {
-            particleCountSpan.textContent = particles.length;
+
+            // 4. Interactions: Perturb phases if particles are too close
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const p1 = particles[i];
+                    const p2 = particles[j];
+
+                    const dx = p1.x - p2.x;
+                    const dy = p1.y - p2.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < INTERACTION_RADIUS) {
+                        // Perturb phases randomly
+                        p1.phaseX += (Math.random() - 0.5) * PHASE_PERTURBATION_MAGNITUDE;
+                        p1.phaseY += (Math.random() - 0.5) * PHASE_PERTURBATION_MAGNITUDE;
+                        p2.phaseX += (Math.random() - 0.5) * PHASE_PERTURBATION_MAGNITUDE;
+                        p2.phaseY += (Math.random() - 0.5) * PHASE_PERTURBATION_MAGNITUDE;
+                    }
+                }
+            }
         }
 
+        // --- Drawing Logic ---
+        function drawParticles() {
+            if (!canvas.width || !canvas.height) return;
 
-        // Animation loop
-        function animate() {
-            // Clear the canvas with a slight fade effect for trails (optional)
-            // ctx.fillStyle = 'rgba(45, 55, 72, 0.3)'; // Tailwind gray-800 with alpha
+            // Clear canvas with a semi-transparent fill for trails effect (optional)
+            // ctx.fillStyle = 'rgba(45, 55, 72, 0.1)'; // Tailwind gray-800 with alpha
             // ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Or a solid clear
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Clear canvas fully
+            ctx.fillStyle = '#2d3748'; // Tailwind gray-800 (canvas background)
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 
-            particles.forEach(particle => {
-                particle.update();
-                particle.draw();
-            });
-
-            requestAnimationFrame(animate);
-        }
-
-        // Resize canvas function
-        function resizeCanvas() {
-            const dpr = window.devicePixelRatio || 1;
-            // Set a max width and height for the canvas, e.g., 800x600
-            // Or make it a percentage of the window size
-            const maxWidth = 800;
-            const maxHeight = 600;
-            
-            const newWidth = Math.min(window.innerWidth * 0.9, maxWidth);
-            const newHeight = Math.min(window.innerHeight * 0.7, maxHeight);
-
-            canvas.width = newWidth * dpr;
-            canvas.height = newHeight * dpr;
-            canvas.style.width = `${newWidth}px`;
-            canvas.style.height = `${newHeight}px`;
-            
-            ctx.scale(dpr, dpr);
-
-
-            // Re-initialize particles if canvas size changes significantly to prevent clumping
-            // or if they are outside new bounds. For simplicity, we'll just let them adjust.
-            // If particles array exists, ensure they are within new bounds
-            if (particles.length > 0) {
-                 particles.forEach(p => {
-                    p.x = Math.max(p.radius, Math.min(canvas.width / dpr - p.radius, p.x));
-                    p.y = Math.max(p.radius, Math.min(canvas.height / dpr - p.radius, p.y));
-                 });
+            for (const particle of particles) {
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, PARTICLE_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = particle.color;
+                ctx.fill();
             }
         }
 
-        // Event Listeners
-        document.getElementById('resetButton').addEventListener('click', () => {
-            // Re-initialize particles on reset
-             const currentParticleCount = particles.length > 0 ? particles.length : numInitialParticles;
-             particles = []; // Clear existing
-             for (let i = 0; i < currentParticleCount; i++) {
-                addOneParticle();
-             }
+        // --- Animation Loop ---
+        let animationFrameId;
+        function gameLoop() {
+            updateParticles();
+            drawParticles();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners for Controls ---
+        numParticlesSlider.addEventListener('input', (e) => {
+            NUM_PARTICLES = parseInt(e.target.value);
+            numParticlesValueDisplay.textContent = NUM_PARTICLES;
+            // No need to reset immediately, can wait for button press or apply dynamically
+        });
+
+        interactionRadiusSlider.addEventListener('input', (e) => {
+            INTERACTION_RADIUS = parseInt(e.target.value);
+            interactionRadiusValueDisplay.textContent = INTERACTION_RADIUS;
         });
         
-        document.getElementById('addParticleButton').addEventListener('click', addOneParticle);
-        document.getElementById('removeParticleButton').addEventListener('click', removeOneParticle);
+        resetButton.addEventListener('click', () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            initSimulation(); // Re-initialize with current slider values
+            gameLoop(); // Restart loop
+        });
+        
+        // --- Resize listener ---
+        window.addEventListener('resize', () => {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            initSimulation();
+            gameLoop();
+        });
 
-        window.addEventListener('resize', resizeCanvas);
 
-        // Initial setup
-        resizeCanvas(); // Set initial canvas size
-        initParticles(); // Create particles
-        animate(); // Start animation
+        // --- Initial Setup and Start ---
+        // Ensure UI elements are updated with default values
+        numParticlesValueDisplay.textContent = NUM_PARTICLES;
+        numParticlesSlider.value = NUM_PARTICLES;
+        interactionRadiusValueDisplay.textContent = INTERACTION_RADIUS;
+        interactionRadiusSlider.value = INTERACTION_RADIUS;
+        
+        // Start the simulation when the window is loaded
+        window.onload = function() {
+            initSimulation();
+            gameLoop();
+        };
     </script>
 </body>
 </html>
